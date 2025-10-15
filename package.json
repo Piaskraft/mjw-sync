@@ -1,0 +1,22 @@
+{
+  "name": "mjw-sync",
+  "version": "1.0.0",
+  "description": "MJW -> Presta sync via Webservice + SQLite cache",
+  "type": "commonjs",
+ "scripts": {
+  "dry": "node src/index.js --once",
+  "real": "node src/index.js --once --real",
+  "cron:dry": "node src/index.js",
+  "cron:real": "REAL=1 node src/index.js",
+   "report": "node src/logs_to_csv.js"
+},
+  "dependencies": {
+    "axios": "^1.12.2",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^17.2.3",
+    "fast-xml-parser": "^5.3.0",
+    "node-cron": "^4.2.1",
+    "pino": "^10.0.0",
+    "sqlite3": "^5.1.7"
+  }
+}
