@@ -241,6 +241,4 @@ Jeśli musisz przywrócić stare ceny:
 ✅ Przetestowany w trybie DRY i REAL
 ✅ Zabezpieczony `.env`, `.gitignore`, SQLite cache
 
----
 
-Chcesz, żebym dorzucił do tego **skrypt rollbacku (np. `npm run rollback <plik.jsonl>` do cofania cen z logu)** i **PM2 config (`ecosystem.config.js`)**, żeby można było odpalać to jednym poleceniem na serwerze?
