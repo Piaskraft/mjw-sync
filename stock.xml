@@ -1,0 +1,6 @@
+<prestashop xmlns:xlink="http://www.w3.org/1999/xlink">
+  <stock_available>
+    <id>TU_WSTAW_ID</id>
+    <quantity>7</quantity>
+  </stock_available>
+</prestashop>

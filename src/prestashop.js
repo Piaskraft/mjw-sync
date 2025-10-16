@@ -2,6 +2,9 @@
 const axios = require('axios');
 const { XMLParser, XMLBuilder } = require('fast-xml-parser');
 
+// atrybut przestrzeni nazw – Presta lubi mieć xlink przy PUT
+const NS_ATTR = { '@_xmlns:xlink': 'http://www.w3.org/1999/xlink' };
+
 const api = axios.create({
   baseURL: process.env.PS_API_URL,
   auth: { username: process.env.PS_API_KEY, password: '' },
@@ -28,8 +31,7 @@ function firstOrNull(x) {
   return null;
 }
 
-
-// funkcje z retry i exponential backoff
+/* ----------------------- HTTP helpers z retry ----------------------- */
 async function apiGet(path, params = {}, retries = 3, delay = 1000) {
   try {
     const { data } = await api.get(path, { params });
@@ -40,10 +42,11 @@ async function apiGet(path, params = {}, retries = 3, delay = 1000) {
       console.warn(`⚠️ apiGet retry ${4 - retries}/3 za ${wait}ms`, path);
       await new Promise(r => setTimeout(r, wait));
       return apiGet(path, params, retries - 1, wait);
-    } else {
-      console.error(`❌ apiGet failed: ${path}`, err.message);
-      throw err;
     }
+    const status = err.response?.status;
+    const body   = err.response?.data;
+    console.error(`❌ apiGet failed: ${path} status=${status}\n${body || err.message}`);
+    throw err;
   }
 }
 
@@ -57,15 +60,38 @@ async function apiPut(path, body, retries = 3, delay = 1000) {
       console.warn(`⚠️ apiPut retry ${4 - retries}/3 za ${wait}ms`, path);
       await new Promise(r => setTimeout(r, wait));
       return apiPut(path, body, retries - 1, wait);
-    } else {
-      console.error(`❌ apiPut failed: ${path}`, err.message);
-      throw err;
     }
+    const status = err.response?.status;
+    const body   = err.response?.data;
+    console.error(`❌ apiPut failed: ${path} status=${status}\n${body || err.message}`);
+    throw err;
   }
 }
 
+/* --------------------------- READ-y / FIND-y --------------------------- */
+// Prosty READ po ID – brakowało, stąd błąd "findById is not a function"
+async function findById(id) {
+  const obj = await apiGet(`/products/${id}`);
+  return obj?.prestashop?.product ?? null;
+}
 
-// Wyszukiwanie produktu
+async function getProductLight(id) {
+  const obj = await apiGet(`/products/${id}`);
+  return obj?.prestashop?.product || null;
+}
+
+async function readProductSummary(id) {
+  const prod = await getProductLight(id);
+  if (!prod) return null;
+  return {
+    id: Number(prod.id),
+    ean13: prod.ean13 || null,
+    reference: prod.reference || null,
+    price: Number(prod.price),
+    id_default_combination: Number(prod.id_default_combination || 0),
+  };
+}
+
 async function findByEAN(ean13) {
   const obj = await apiGet('/products', {
     'filter[ean13]': `[${ean13}]`,
@@ -98,21 +124,53 @@ async function findByRef(ref) {
   } : null;
 }
 
-async function getProductLight(id) {
-  const obj = await apiGet(`/products/${id}`);
-  return obj?.prestashop?.product || null;
+// Sprytne szukanie: najpierw product.reference, potem combination.reference
+async function findByRefAny(ref) {
+  const p = await findByRef(ref);
+  if (p) return { ...p, attrId: 0 };
+
+  const obj = await apiGet('/combinations', {
+    'filter[reference]': `[${ref}]`,
+    limit: 1,
+    display: '[id,id_product,reference]'
+  });
+  const c = firstOrNull(obj?.prestashop?.combinations?.combination);
+  if (!c) return null;
+
+  const attrId = Number(c.id);
+  const prod = await readProductSummary(Number(c.id_product));
+  if (!prod) return null;
+  return { ...prod, attrId };
 }
 
-// Update ceny netto (price tax excluded)
-async function updateProductPrice(id, newNetPriceEUR) {
-  const prod = await getProductLight(id);
-  if (!prod) throw new Error(`Brak produktu ${id}`);
-  prod.price = String(Number(newNetPriceEUR).toFixed(2)); // netto, bez VAT
-  const xml = builder.build({ prestashop: { product: prod }});
+/* ------------------------- UPDATE ceny NETTO ------------------------- */
+// Minimalny, stabilny PUT ceny (NETTO: product.price, VAT dolicza Presta)
+async function setProductNetPrice(id, newNetPriceEUR) {
+  const product = { id: String(id), price: Number(newNetPriceEUR).toFixed(2), id_tax_rules_group: '0' };
+  const xml = builder.build({ prestashop: { ...NS_ATTR, product }});
   return apiPut(`/products/${id}`, xml);
 }
 
-// Stock availables
+// Update ceny netto na bazie pełnego GET-a (czyści zbędne pola przed PUT)
+async function updateProductPrice(id, newNetPriceEUR) {
+  const prod = await getProductLight(id);
+  if (!prod) throw new Error(`Brak produktu ${id}`);
+
+  // ustaw nową cenę NETTO
+  prod.price = String(Number(newNetPriceEUR).toFixed(2));
+
+  // wyczyść pola, których nie chcemy dotykać przy PUT
+  delete prod.manufacturer_name;
+  delete prod.position_in_category;
+  delete prod.associations;
+  delete prod.quantity;
+
+  // zbuduj XML dopiero po czyszczeniu
+  const xml = builder.build({ prestashop: { ...NS_ATTR, product: prod }});
+  return apiPut(`/products/${id}`, xml);
+}
+
+/* ----------------------------- STOCKi ----------------------------- */
 async function getStockAvailableId(product_id, product_attribute_id = 0) {
   const obj = await apiGet('/stock_availables', {
     'filter[id_product]': `[${product_id}]`,
@@ -129,15 +187,24 @@ async function updateStockQuantity(stock_available_id, quantity) {
   const sa = obj?.prestashop?.stock_available;
   if (!sa) throw new Error(`Brak stock_available ${stock_available_id}`);
   sa.quantity = String(Number(quantity));
-  const xml = builder.build({ prestashop: { stock_available: sa }});
+  const xml = builder.build({ prestashop: { ...NS_ATTR, stock_available: sa }});
   return apiPut(`/stock_availables/${stock_available_id}`, xml);
 }
 
+/* ----------------------------- EXPORT ----------------------------- */
 module.exports = {
+  // READ/FIND
+  findById,
   findByEAN,
   findByRef,
+  findByRefAny,
   getProductLight,
+
+  // PRICE
+  setProductNetPrice,
   updateProductPrice,
+
+  // STOCK
   getStockAvailableId,
   updateStockQuantity,
 };
