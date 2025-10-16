@@ -1,11 +1,4 @@
 
-Perfekcyjnie ✅
-Skoro cron (harmonogram co godzinę) będzie już po stronie **developera na serwerze**, to Ty masz gotowy, przetestowany kod lokalnie — teraz wystarczy przygotować **pełne, profesjonalne README.md** z instrukcją instalacji, konfiguracji, działania i obsługi.
-
-Poniżej masz **gotowy plik README.md**, który możesz od razu wkleić do repo (`mjw-sync/README.md`) albo wysłać devowi.
-Napisałem go tak, jak robią to doświadczeni programiści — krok po kroku, jasno i bez skrótów.
-
----
 
 # 🧰 MJW → PrestaShop Sync
 
