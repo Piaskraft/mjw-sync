@@ -143,6 +143,27 @@ async function findByRefAny(ref) {
   return { ...prod, attrId };
 }
 
+async function findByEANAny(ean13) {
+  // 1) Spróbuj znaleźć po produkcie
+  const p = await findByEAN(ean13);
+  if (p) return { ...p, attrId: 0 };
+
+  // 2) Szukaj po kombinacji
+  const obj = await apiGet('/combinations', {
+    'filter[ean13]': `[${ean13}]`,
+    limit: 1,
+    display: '[id,id_product,ean13,reference]'
+  });
+  const c = firstOrNull(obj?.prestashop?.combinations?.combination);
+  if (!c) return null;
+
+  const attrId = Number(c.id);
+  const prod = await readProductSummary(Number(c.id_product));
+  if (!prod) return null;
+  return { ...prod, attrId };
+}
+
+
 /* ------------------------- UPDATE ceny NETTO ------------------------- */
 // Minimalny, stabilny PUT ceny (NETTO: product.price, VAT dolicza Presta)
 async function setProductNetPrice(id, newNetPriceEUR) {
@@ -198,6 +219,7 @@ module.exports = {
   findByEAN,
   findByRef,
   findByRefAny,
+  findByEANAny,
   getProductLight,
 
   // PRICE

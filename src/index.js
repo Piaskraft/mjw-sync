@@ -1,4 +1,24 @@
 // src/index.js
+const fs = require('fs');
+const path = require('path');
+
+// --- Mapa EAN/reference -> (id_product, id_product_attribute)
+function loadMapping() {
+  const p = path.join(process.cwd(), 'mapping.csv');
+  if (!fs.existsSync(p)) return new Map();
+  const csv = fs.readFileSync(p, 'utf8').trim();
+  const lines = csv.split(/\r?\n/).filter(Boolean);
+  const map = new Map();
+  for (let i = 1; i < lines.length; i++) { // pomijamy nagłówek
+    const [ean, idp, idpa] = lines[i].split(',').map(s => (s ?? '').trim());
+    if (!ean) continue;
+    map.set(ean, { id: Number(idp), attrId: Number(idpa || 0) });
+  }
+  return map;
+}
+const KEY_MAP = loadMapping();
+
+
 const cron = require('node-cron');
 require('dotenv').config();
 
@@ -6,10 +26,12 @@ const { fetchFeed } = require('./feed');
 const {
   findByEAN,
   findByRefAny,
+  findByEANAny, 
   updateProductPrice,
   getStockAvailableId,
   updateStockQuantity,
   setProductNetPrice,
+   getProductLight,
 } = require('./prestashop');
 
 const { getCache, upsertCache } = require('./db');
@@ -22,8 +44,7 @@ const MARGIN = Number(process.env.MARGIN ?? 0.34);
 const MAX_DELTA = Number(process.env.MAX_DELTA ?? 0.10);
 const RPS = Number(process.env.REQS_PER_SEC ?? 5);
 
-const fs = require('fs');
-const path = require('path');
+
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -100,27 +121,37 @@ async function runOnce() {
         continue;
       }
 
-      // --- znajdź produkt ---
-      let p = null;
+     // --- znajdź produkt ---
+let p = null;
 
-      if (process.env.FORCE_ID) {
-        // tryb testowy – wymuszone ID
-        const { findById } = require('./prestashop');
-        const forced = await findById(Number(process.env.FORCE_ID));
-        if (!forced) {
-          console.log('❓ Brak produktu po FORCE_ID =', process.env.FORCE_ID);
-          continue;
-        }
-        p = { ...forced, attrId: forced.id_default_combination || 0 };
-      } else {
-        // standardowe wyszukiwanie
-        if (row.ean) p = await findByEAN(String(row.ean).trim());
-        if (!p && row.reference) p = await findByRefAny(String(row.reference).trim());
-        if (!p) {
-          console.log(`❓ Brak produktu w Preście dla ${key}`);
-          continue;
-        }
-      }
+// 1) MAPOWANIE – jeśli mamy wpis dla tego klucza, używamy go od razu
+const rawKey = row.ean || row.reference;
+if (rawKey && KEY_MAP.has(String(rawKey).trim())) {
+  const m = KEY_MAP.get(String(rawKey).trim());
+  const prod = await getProductLight(m.id); // dla potwierdzenia i logów
+  if (!prod) {
+    console.log(`❓ Mapowanie wskazuje ID ${m.id}, ale produkt nie istnieje w Preście`);
+    continue;
+  }
+  p = {
+    id: Number(m.id),
+    attrId: Number.isFinite(m.attrId) ? Number(m.attrId) : 0,
+    id_default_combination: Number(prod.id_default_combination || 0),
+    reference: prod.reference || null,
+    ean13: prod.ean13 || null,
+  };
+}
+
+// 2) Jeżeli brak w mapowaniu → standardowe wyszukiwanie
+if (!p) {
+  if (row.ean) p = await findByEANAny(String(row.ean).trim()); // ⬅️ użyj ANY (product + combinations)
+  if (!p && row.reference) p = await findByRefAny(String(row.reference).trim());
+  if (!p) {
+    console.log(`❓ Brak produktu w Preście dla ${key}`);
+    continue;
+  }
+}
+
 
       // --- ustal attrId (id_product_attribute) BEZBŁĘDNIE ---
       let attrIdRaw = (p && p.attrId !== undefined) ? p.attrId : p?.id_default_combination;
