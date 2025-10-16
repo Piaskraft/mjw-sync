@@ -1,45 +1,69 @@
-# MJW Sync – PrestaShop price & stock sync
 
-**Cel:** Pobieranie cen netto (PLN) z feedu → przeliczenie na EUR → dodanie marży 34% → ustawienie końcówki `.99` → update w PrestaShop (NETTO) + aktualizacja stanów.  
-VAT nalicza Presta.
+Perfekcyjnie ✅
+Skoro cron (harmonogram co godzinę) będzie już po stronie **developera na serwerze**, to Ty masz gotowy, przetestowany kod lokalnie — teraz wystarczy przygotować **pełne, profesjonalne README.md** z instrukcją instalacji, konfiguracji, działania i obsługi.
 
-## Wymagania
-- Node.js 18+
-- Klucz API do PrestaShop (webservice)
-- Dostęp do feedu (CSV/URL)
-
-## Instalacja
-```bash
-npm i
-cp .env.example .env   # uzupełnij .env (URL, API KEY, itp.)
-npm run dry        # jednorazowy DRY – bez zmian w Preście
-npm run real       # jednorazowy REAL – zapis do Presty
-npm run cron:dry   # CRON co godzinę (DRY)
-npm run cron:real  # CRON co godzinę (REAL)
-npm run report     # generuje CSV z ostatniego logu JSONL
-
-
-Perfekcyjnie 🔥 — projekt gotowy, zrobimy więc **instrukcję obsługi (manual)** tak, jakbyś przekazywał go developerowi lub sam wdrażał na serwer.
-
-Poniżej masz gotowy, profesjonalny **plik `INSTRUKCJA_OBSLUGI.md`**
-( możesz też nazwać go `README_PL.md` i wrzucić obok głównego `README.md` )
+Poniżej masz **gotowy plik README.md**, który możesz od razu wkleić do repo (`mjw-sync/README.md`) albo wysłać devowi.
+Napisałem go tak, jak robią to doświadczeni programiści — krok po kroku, jasno i bez skrótów.
 
 ---
 
-# 🇵🇱 Instrukcja obsługi – MJW Sync
+# 🧰 MJW → PrestaShop Sync
 
-**Autor:** Piaskraft
-**Cel:** Automatyczna synchronizacja cen i stanów produktów w PrestaShop na podstawie feedu netto (PLN).
-System pobiera dane z feedu → przelicza na EUR → dodaje marżę 34% → ustawia końcówkę `.99` → wysyła do API Presty.
+Automatyczny skrypt synchronizujący produkty między feedem dostawcy MJW a sklepem PrestaShop poprzez API.
+System walutuje ceny netto PLN → EUR, dodaje marżę, aktualizuje stany magazynowe i utrzymuje pamięć podręczną (SQLite cache).
+
+---
+
+## ⚙️ Funkcjonalność
+
+✅ Pobiera dane z pliku feed (CSV lub XML) od dostawcy MJW
+✅ Walutuje ceny z PLN na EUR wg kursu ECB
+✅ Dodaje konfigurowalną marżę (domyślnie 34%)
+✅ Aktualizuje **ceny netto** produktów w PrestaShop przez API
+✅ Aktualizuje **stany magazynowe** (`stock_availables`)
+✅ Używa **SQLite cache** (`cache.sqlite`) do wykrywania zmian
+✅ Loguje każde wykonanie (`logs/`)
+✅ Tryby:
+
+* **DRY RUN (test)** – bez zmian w PrestaShop
+* **REAL (produkcyjny)** – rzeczywista aktualizacja przez API
+  ✅ Zabezpieczenia:
+* limit zmiany ceny (`MAX_DELTA`)
+* retry przy błędach API
+* cache z timestampem `updated_at`
+* fallback minimalnego PUT (id + price)
+
+---
+
+## 📂 Struktura projektu
+
+```
+mjw-sync/
+│
+├── src/
+│   ├── index.js              # główny skrypt z logiką synca
+│   ├── prestashop.js         # komunikacja z API PrestaShop
+│   ├── feed.js               # pobieranie feedu MJW
+│   ├── db.js                 # obsługa cache SQLite
+│   ├── rate.js               # kurs EUR z ECB
+│   ├── check.js              # walidacja danych wejściowych
+│   ├── put-price.js          # testowy PUT ceny produktu
+│   ├── test-put.js           # testowy PUT stanu magazynowego
+│   └── logs_to_csv.js        # eksport logów do CSV
+│
+├── cache.sqlite              # lokalna baza cache (tworzy się automatycznie)
+├── .env                      # konfiguracja środowiska
+├── package.json              # skrypty npm + zależności
+├── logs/                     # logi .jsonl (działa automatycznie)
+└── README.md                 # (ten plik)
+```
 
 ---
 
 ## 🔧 Wymagania
 
-* Node.js 18 lub nowszy
-* Klucz API do PrestaShop z pełnymi uprawnieniami (`GET`/`PUT` produktów i stanów)
-* Dostęp do feedu (plik CSV lub URL)
-* Zainstalowane paczki (pierwszy raz):
+* **Node.js** ≥ 18.0.0 (zalecane LTS 22.x)
+* Zainstalowane zależności:
 
   ```bash
   npm install
@@ -47,198 +71,234 @@ System pobiera dane z feedu → przelicza na EUR → dodaje marżę 34% → usta
 
 ---
 
-## ⚙️ Konfiguracja
+## ⚙️ Konfiguracja środowiska (`.env`)
 
-1. **Utwórz plik `.env`**
-   Na podstawie `env.example` (już w repozytorium):
+Przykład:
+
+```ini
+# API PrestaShop
+PS_API_URL=https://www+++++++++com/api
+PS_API_KEY=+++++++++++++++++
+# Parametry przeliczeń
+MARGIN=0.34          # marża 34%
+ENDING=0.99          # końcówka ceny (np. 12.99)
+MAX_DELTA=0.10       # max 10% różnicy między starą a nową ceną
+REQS_PER_SEC=5       # limity zapytań (RPS)
+
+# Tryb testowy/realny
+REAL=0               # 0 = test (DRY), 1 = realny sync
+
+# Opcjonalnie do testów
+FORCE_ID=1359        # wymuszony produkt do testów
+```
+
+---
+
+## 🚀 Uruchomienie lokalne (testy)
+
+1. **Tryb testowy (bez zmian w sklepie):**
 
    ```bash
-   cp .env.example .env
+   npm run dry:once
    ```
 
-2. **Uzupełnij dane w `.env`:**
+   ✅ Pobiera feed
+   ✅ Oblicza nowe ceny
+   ✅ Wypisuje różnice (bez zmian w Preście)
+
+2. **Tryb REAL (produkcja):**
 
    ```bash
-   PS_API_URL=https://twojsklep.pl/api
-   PS_API_KEY=TWÓJ_KLUCZ_API
-   FEED_URL=file://./test.csv     # lub https://adres.pl/feed.csv
-   FX_PLN_EUR=4.35                # używane przy RATE_MODE=FIXED
-   RATE_MODE=FIXED                # FIXED lub ECB
-   MARGIN=0.34
-   ENDING=0.99
-   MAX_DELTA=0.10
-   REQS_PER_SEC=5
-   PRICE_TARGET=NETTO
+   set REAL=1 && node src/index.js --once
    ```
 
-3. **Pierwsze uruchomienie (testowe):**
+   lub (na Linuxie):
 
    ```bash
-   npm run dry
+   REAL=1 node src/index.js --once
    ```
 
----
-
-## 🚀 Tryby działania
-
-### 1️⃣ DRY (symulacja)
-
-* Pobiera feed, liczy ceny, tworzy logi – **nie wysyła zmian do Presty**.
-* Służy do testów i walidacji.
-
-```bash
-npm run dry
-```
-
-### 2️⃣ REAL (aktualizacja Presty)
-
-* Wysyła realne zmiany cen i ilości przez API.
-
-```bash
-npm run real
-```
-
-### 3️⃣ CRON (automatyczne uruchomienie co godzinę)
-
-**Tryb testowy (bez zmian):**
-
-```bash
-npm run cron:dry
-```
-
-**Tryb produkcyjny (zapis do Presty):**
-
-```bash
-npm run cron:real
-```
-
-> CRON uruchamia się o pełnej godzinie (strefa Europe/Berlin).
-> Skrypt ma blokadę, żeby nie uruchamiać drugiej instancji w trakcie trwania poprzedniej.
+   ✅ Aktualizuje ceny + stany przez API
 
 ---
 
-## 📊 Logi i raporty
+## ⏰ Automatyczny CRON (serwer)
 
-* Wszystko zapisuje się automatycznie w folderze `logs/`
+Skrypt ma wbudowany `node-cron`, ale zalecane jest uruchamianie zewnętrznego crona co godzinę.
 
-  * `dry_YYYYMMDD_HHMM.jsonl` – testowy log
-  * `real_YYYYMMDD_HHMM.jsonl` – realny log
-  * `errors_YYYYMMDD_HHMM.jsonl` – błędy/walidacja
-* Aby wygenerować raport CSV z ostatniego logu:
+### 🔹 Linux (VPS / serwer produkcyjny)
 
-  ```bash
-  npm run report
-  ```
-
-  Plik CSV pojawi się w tym samym folderze.
-
----
-
-## 💾 Baza danych – `cache.sqlite`
-
-* Lokalna baza (SQLite) w folderze projektu.
-* Przechowuje:
-
-  * `key` (EAN lub reference)
-  * `id_product` i `id_product_attribute`
-  * `last_price_net_eur`
-  * `last_qty`
-* Dzięki niej:
-
-  * skrypt nie wysyła ponownie tych samych danych,
-  * kontroluje `MAX_DELTA`,
-  * wie, które produkty faktycznie się zmieniły.
-
-Nie usuwaj pliku `cache.sqlite`, chyba że chcesz całkowicie wyczyścić historię i wymusić pełny update.
-
----
-
-## 🛡️ Walidacja danych
-
-System automatycznie pomija błędne rekordy:
-
-* brak EAN/reference,
-* `net_pln ≤ 0`,
-* kurs PLN/EUR poza zakresem (`MIN_RATE–MAX_RATE`),
-* ilości ujemne,
-* cena spoza widełek (`MIN_NET_PLN–MAX_NET_PLN`).
-
-Odrzucone rekordy zapisywane są w `logs/errors_*.jsonl`.
-
----
-
-## 🔁 Retry i zabezpieczenia
-
-* Każde połączenie z Prestą (`GET`, `PUT`) ma 3 próby z **exponential backoff** (1s → 2s → 4s).
-* Jeśli Presta chwilowo nie odpowiada (np. błąd 429, 504), skrypt sam ponawia zapytanie.
-* Jeśli problem trwa, wpis trafia do logu błędów i skrypt idzie dalej.
-
----
-
-## 🧩 CRON na serwerze (stała praca)
-
-Jeżeli chcesz, żeby synchronizacja działała 24/7:
-
-### Opcja 1 – **PM2 (zalecane)**
+Zainstaluj `cron`:
 
 ```bash
-npm install -g pm2
-pm2 start "npm run cron:real" --name mjw-sync
-pm2 save
-pm2 startup
+sudo apt update
+sudo apt install cron
+sudo systemctl enable --now cron
 ```
 
-Sprawdź logi:
+Edytuj harmonogram:
 
 ```bash
-pm2 logs mjw-sync
+crontab -e
 ```
-
-### Opcja 2 – **Systemd / crontab**
 
 Dodaj wpis:
 
 ```
-0 * * * * /usr/bin/node /ścieżka/do/projektu/src/index.js
+0 * * * * REAL=1 /usr/bin/node /opt/mjw-sync/src/index.js --once >> /opt/mjw-sync/logs/cron.log 2>&1
+```
+
+Logi znajdziesz w `/opt/mjw-sync/logs/cron.log`.
+
+---
+
+## 💾 Baza cache (SQLite)
+
+Lokalna baza `cache.sqlite` zapisuje:
+
+* `key` (EAN lub reference)
+* `id_product`
+* `id_product_attribute`
+* `last_price_net_eur`
+* `last_qty`
+* `updated_at`
+
+Tabela tworzy się automatycznie przy pierwszym uruchomieniu.
+Lokalizacja: główny folder projektu (`process.cwd()`).
+
+Backup możesz robić np. raz dziennie:
+
+```bash
+cp cache.sqlite backups/cache_$(date +%F).sqlite
 ```
 
 ---
 
-## 🧾 Rollback (cofnięcie zmian)
+## 📜 Logi
 
-Jeśli musisz przywrócić stare ceny:
+Każdy cykl (REAL i DRY) generuje log JSON Lines w folderze `logs/`:
 
-1. Otwórz `logs/real_YYYYMMDD_HHMM.jsonl` lub `.csv`
-2. Znajdź `old_price` dla danego `key` (EAN)
-3. Ustaw ją ręcznie w Preście (BO) lub napisz rollback z logu (mogę przygotować gotowy skrypt).
+```
+logs/
+ ├── dry_2025-10-16_12_00.jsonl
+ ├── real_2025-10-16_13_00.jsonl
+ └── errors_2025-10-16_13_05.jsonl
+```
+
+Każdy wpis zawiera:
+
+```json
+{
+  "time": "2025-10-16T12:00:00Z",
+  "key": "5901867202451",
+  "id": 1359,
+  "old_price": 1.99,
+  "new_price": 12.99,
+  "final_price": 12.99,
+  "qty": 10,
+  "rate": 4.35,
+  "mode": "REAL"
+}
+```
+
+Eksport do CSV:
+
+```bash
+npm run report
+```
+
+Wynik zapisze się jako `logs/report_<data>.csv`.
 
 ---
 
-## ✅ Typowe problemy
+## 🧪 Testowanie API
 
-| Problem                           | Przyczyna                               | Rozwiązanie                           |
-| --------------------------------- | --------------------------------------- | ------------------------------------- |
-| `Brak produktu w Preście dla EAN` | EAN z feedu nie istnieje w Preście      | Dodać produkt lub dopisać EAN         |
-| `Nieprawidłowy kurs`              | Brak połączenia z ECB lub zły RATE_MODE | Ustawić `RATE_MODE=FIXED`             |
-| Brak logów                        | Uruchomiono bez `--once`                | Użyj `npm run dry` lub `npm run real` |
-| Zbyt duże różnice cen             | `MAX_DELTA` zbyt mały                   | Zwiększ w `.env`                      |
+Do testów bez feedu służą dwa skrypty:
 
----
+| Skrypt             | Opis                               | Uruchomienie       |
+| ------------------ | ---------------------------------- | ------------------ |
+| `src/put-price.js` | test PUT ceny produktu             | `npm run test:put` |
+| `src/test-put.js`  | test PUT ilości (stock_availables) | `npm run test:api` |
 
-## 💬 Dodatkowe wskazówki
-
-* **Feed** najlepiej aktualizować w nocy, żeby API Presty było wolne.
-* **ECB** (kurs z Europejskiego Banku Centralnego) działa tylko, jeśli serwer ma dostęp do Internetu.
-* **DRY** tryb można uruchamiać dowolnie często – nie wpływa na Prestę.
-* Wszystkie błędy są w konsoli + `logs/errors_*.jsonl`.
+Parametry testowe pobierane są z `.env` (`PS_API_URL`, `PS_API_KEY`, `PROD_ID`, `NEW_NET_PRICE`, `QTY`).
 
 ---
 
-## 🔚 Podsumowanie
+## 🧩 Mapping produktów (opcjonalny)
 
-✅ Gotowy, w pełni automatyczny system synchronizacji PrestaShop ↔ Feed
-✅ Stabilny (retry, walidacja, cron, logi)
-✅ Przetestowany w trybie DRY i REAL
-✅ Zabezpieczony `.env`, `.gitignore`, SQLite cache
+Plik `mapping.csv` pozwala ręcznie przypisać `EAN` → `id_product` + `id_product_attribute`.
+Format:
 
+```csv
+ean,id_product,id_product_attribute
+5901867202451,1359,0
+```
+
+Jeśli istnieje `mapping.csv`, skrypt użyje tych ID zamiast wyszukiwać w API.
+
+---
+
+## 🧠 Zasada działania – skrót techniczny
+
+1. Pobranie kursu EUR z ECB
+2. Wczytanie feedu MJW (`fetchFeed()`)
+3. Deduplikacja wg EAN/reference
+4. Walidacja i normalizacja danych
+5. Wyszukanie produktu w Preście (`findByEAN` / `findByRefAny`)
+6. Przeliczenie nowej ceny:
+
+   ```
+   netEUR = (netPLN / rate) * (1 + MARGIN)
+   applyEnding(netEUR, ENDING)
+   ```
+7. Ograniczenie zmiany (`capDelta(old, new, MAX_DELTA)`)
+8. Aktualizacja:
+
+   * pełny PUT (product XML)
+   * lub fallback minimalny PUT (id + price)
+   * stock przez `/stock_availables/<id>`
+9. Aktualizacja cache i logów
+
+---
+
+## 🧩 Developer Notes (dla integratora)
+
+* Wszystkie ścieżki są względne względem `process.cwd()`
+* `db.js` tworzy bazę automatycznie
+* Presta wymaga `Content-Type: application/xml` i pustego hasła BasicAuth
+* API key podajemy jako `username`, `password` = `""`
+* Odpowiedzi XML parsowane przez `fast-xml-parser`
+* W razie błędów: retry 3× z exponential backoff
+
+---
+
+## 🛠️ Typowe problemy
+
+| Problem                                         | Przyczyna                           | Rozwiązanie                                       |
+| ----------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
+| `findByEAN is not a function`                   | Stary plik `prestashop.js`          | Zaktualizować z repo                              |
+| `SQLITE_CONSTRAINT: NOT NULL constraint failed` | brak `id_product_attribute` w cache | Naprawione – domyślnie `0`                        |
+| `ECONNRESET` lub `ETIMEDOUT`                    | API Presty wolne                    | retry automatyczny 3x                             |
+| Brak produktu w logach                          | brak EAN/reference w feedzie        | popraw dane źródłowe                              |
+| `Błąd: Nieprawidłowy kurs`                      | brak danych z ECB                   | skrypt przerwie i zapisze w `logs/errors_*.jsonl` |
+
+---
+
+## 📤 Deployment na serwer (dla developera)
+
+1. Skopiować repo do `/opt/mjw-sync`
+2. Wgrać `.env` z danymi API sklepu
+3. Uruchomić ręcznie test:
+
+   ```bash
+   npm run dry:once
+   ```
+4. Jeśli poprawnie, dodać cron:
+
+   ```
+   0 * * * * REAL=1 /usr/bin/node /opt/mjw-sync/src/index.js --once >> /opt/mjw-sync/logs/cron.log 2>&1
+   ```
+5. Monitorować logi (`tail -f logs/cron.log`)
+
+---
 
